@@ -1,0 +1,50 @@
+Keyword Keluhan,Poli Tujuan
+"Nyeri (umum, ringan)",Klinik Umum
+"Demam (ringan, < 3 hari)",Klinik Umum
+"Flu, Pilek",Klinik Umum
+Pusing (ringan),Klinik Umum
+"COVID, Kena virus, Swab",Klinik Skrining COVID-19
+"Batuk (kronis, berdahak)",Klinik Paru
+Sesak napas,Klinik Paru
+Nyeri dada,Klinik Jantung
+Jantung berdebar,Klinik Jantung
+telinga,Klinink THT
+"Radang, Sakit telinga, Sinus",Klinink THT
+mata kiri,Klinik Mata
+mata kanan,Klinik Mata
+mata,Klinik Mata
+"Penglihatan kabur, Mata merah",Klinik Mata
+gusi,Klinik Gigi & Mulut
+sakit gigi,Klinik Gigi & Mulut
+gigi,Klinik Gigi & Mulut
+nyeri mulut,Klinik Gigi & Mulut
+mulut,Klinik Gigi & Mulut
+"Gigi berlubang, Sakit gusi",Klinik Gigi & Mulut
+"Pasang behel, Kawat gigi",Klinik Orthodonti
+"Cabut gigi (kompleks), Rahang bengkak",Klinik Bedah Mulut
+"Ruam gatal, Jerawat parah",Klinik Kulit & Kelamin
+"Sakit saat buang air kecil, Batu ginjal",Klinik Urologi
+"Mual muntah, Sakit perut (kronis)",Klinik Penyakit Dalam
+"Tifus, Hepatitis, Anemia",Klinik Penyakit Dalam
+"Kontrol diabetes, Gula darah tinggi",Klinik Diabetik Terpadu
+"Kesemutan, Migrain parah, Saraf kejepit",Klinik Nyeri dan Saraf
+"Patah tulang, Cedera sendi, Kecelakaan",Klinik Bedah Tulang
+"Benjolan (mencurigakan), Kanker",Klinik Bedah Onkologi
+Penyakit jantung (perlu bypass),Klinik Bedah Toraks Kardio Vaskuler
+"Pendarahan saluran cerna, Usus (perlu operasi)",Klinik Bedah Digestive
+"Bayi demam, Anak sakit",Klinik Anak
+Kontrol (Bayi PICU/NICU),Klinik Post PICU / NICU
+"Hamil, Cek kandungan",Klinik Kandungan & Kebidanan
+"Konsultasi ASI, Payudara",Klinik Laktasi
+"Terapi fisik, Fisio, Pemulihan pasca operasi",Fisioterapi / Klinik Rehabilitasi Medik
+"Kontrol lansia, Komplikasi banyak penyakit",Klinik Geriatri
+"Konsultasi diet, Berat badan",Klinik Gizi & Obesitas
+"Tes HIV, Tes penyakit menular seksual",Klinik VCT
+"Cek kesehatan lengkap, Perlu surat sehat",Medical Check Up
+"Perlu Imunisasi (Anak, Dewasa, Haji)","Klinik Imunisasi Anak, Dewasa, Umrah & Haji"
+Kejang,KLINIK NEUROLOGI
+"pusing hebat, hampir pingsan",KLINIK NEUROLOGI
+kejang berulang,KLINIK NEUROLOGI
+tangan kiri tidak bisa digerakkan,KLINIK NEUROLOGI
+tangan tidak bisa digerakkan,KLINIK NEUROLOGI
+sulit bicara dan lemas separuh badan,KLINIK NEUROLOGI
