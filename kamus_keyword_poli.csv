@@ -42,6 +42,8 @@ nafas ngos ngosan,Klinik Jantung
 berdebar,Klinik Jantung
 dada berat,Klinik Jantung
 dada sakit,Klinik Jantung
+dada,Klinik Jantung
+jantung,Klinik Jantung
 Nyeri dada,Klinik Jantung
 Jantung berdebar,Klinik Jantung
 telinga,Klinink THT
@@ -77,17 +79,23 @@ Batu ginjal,Klinik Penyakit Dalam
 kulit menguning,Klinik Penyakit Dalam
 sering haus,Klinik Penyakit Dalam
 haid tidak teratur,Klinik Penyakit Dalam
+perut kanan atas ,Klinik Penyakit Dalam
 nyeri haid parah,Klinik Penyakit Dalam
 keputihan,Klinik Penyakit Dalam
 asam urat,Klinik Penyakit Dalam
+pembuluh darah,Klinik Penyakit Dalam
+perut,Klinik Penyakit Dalam
+lambung,Klinik Penyakit Dalam
 Anemia,Klinik Penyakit Dalam
 luka sulit sembuh,klinik penyakit dalam
+ulu hati,klinik penyakit dalam
 gula darah,Klinik Penyakit Dalam
 Gula darah tinggi,Klinik Diabetik Terpadu
 Kontrol diabetes,Klinik Diabetik Terpadu
 Saraf kejepit,Klinik Nyeri dan Saraf
 Kesemutan,Klinik Nyeri dan Saraf
 Kecelakaan,Klinik Bedah Tulang
+tulang,Klinik Bedah Tulang
 Cedera ,Klinik Bedah Tulang
 keseleo,Klinik Bedah Tulang
 Patah tulang,Klinik Bedah Tulang
@@ -119,3 +127,5 @@ sulit konsentrasi,KLINIK NEUROLOGI
 susah tidur,KLINIK NEUROLOGI
 tremor,KLINIK NEUROLOGI
 stroke,KLINIK NEUROLOGI
+syaraf,KLINIK NEUROLOGI
+saraf,KLINIK NEUROLOGI
