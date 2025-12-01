@@ -14,7 +14,7 @@ app = FastAPI()
 # ==========================================
 print("Loading Models & Dictionaries...")
 
-# --- RULE DARI NOTEBOOK (CELL 14) ---
+# --- UPDATE: RULE DARI NOTEBOOK (CELL 14) ---
 KEYWORD_KLINIK_UMUM = [
     'demam', 'meriang', 'pusing', 'sakit kepala',
     'batuk pilek', 'pilek', 'flu',
@@ -35,7 +35,7 @@ try:
     lgb_model = joblib.load('lgb_final.pkl')
     scaler = joblib.load('scaler_final.pkl')
     
-    # Load Dictionaries (Harus SAMA dengan train.py)
+    # Load Dictionaries
     KAMUS_SINGKATAN = load_dictionary('kamus_singkatan.csv', 'Singkatan', 'Bentuk Lengkap')
     kamus_medis_df = pd.read_csv('kamus_medis.csv', dtype=str).fillna('')
     KAMUS_MEDIS_FULL = dict(zip(kamus_medis_df['istilah_lama'].str.lower(), kamus_medis_df['istilah_standar'].str.lower()))
@@ -47,10 +47,9 @@ except Exception as e:
     print(f"CRITICAL ERROR: {e}")
 
 # ==========================================
-# 2. HELPER FUNCTIONS (Harus SAMA dengan train.py)
+# 2. HELPER FUNCTIONS
 # ==========================================
-# Copy paste helper function (medical_expansions, clean_text, enhance_medical_text, dll)
-# yang SAMA PERSIS dengan train.py agar transformasi data konsisten.
+# (Bagian ini sama dengan train.py, tidak berubah)
 medical_expansions = {
     'jantung': 'jantung cardiac cardio heart arrhythmia coronary angina pectoris cvd cardiovascular',
     'hipertensi': 'hipertensi hypertension htn tekanan tinggi darah tinggi blood pressure',
@@ -125,7 +124,6 @@ def find_poli_from_keyword(keluhan):
     return ''
 
 def create_weighted_text(row):
-    # Logic ini HARUS SAMA dengan train.py
     diagnosa_text = str(row.get('diagnosa_enhanced', ''))
     keluhan_text = str(row.get('keluhan_enhanced', ''))
     riwayat_text = str(row.get('riwayat_enhanced', ''))
@@ -146,16 +144,35 @@ def create_weighted_text(row):
     if row.get('geriatric_case', 0) == 1: text += " GERIATRIC_SPECIALTY ELDERLY_CARE LANSIA_CARE " * 2
     return text.replace('nan','').strip()
 
-# LOGIC BARU: RULE_KLINIK_UMUM (Dari Notebook Cell 14)
-def check_rule_klinik_umum(keluhan_raw, poli_triage, max_confidence, threshold):
+# --- UPDATE: FUNGSI BARU DARI NOTEBOOK ---
+def RULE_FALLBACK_POLI(keluhan_raw, poli_triage, max_confidence, threshold, usia):
+    """
+    Logika penentuan poli berdasarkan aturan bisnis dan confidence level.
+    Sesuai dengan Cell 14 di Notebook terbaru.
+    """
     text = str(keluhan_raw).lower().strip()
     poli_triage = str(poli_triage).upper().strip()
-    # Rule 1: Kamus Triage bilang umum
-    if poli_triage == 'KLINIK UMUM': return True
-    # Rule 2: Keluhan tidak spesifik & confidence rendah
+
+    # 1) Kalau kamus triase sudah punya jawaban → pakai itu
+    if poli_triage:
+        return poli_triage
+
+    # 2) Kalau keluhan sangat umum + confidence model rendah
     if any(kw in text for kw in KEYWORD_KLINIK_UMUM) and max_confidence < threshold:
-        return True
-    return False
+        if usia < 18:
+            return 'KLINIK ANAK'
+        else:
+            return 'KLINIK UMUM'
+
+    # 3) Kalau confidence rendah (umum) → fallback berdasarkan umur
+    if max_confidence < threshold:
+        if usia < 18:
+            return 'KLINIK ANAK'
+        else:
+            return 'KLINIK UMUM'
+
+    # 4) Kalau tidak memenuhi kondisi fallback
+    return None
 
 # ==========================================
 # 3. API ENDPOINT
@@ -175,6 +192,7 @@ def predict_poli(data: PatientRequest):
             'keluhan': data.keluhan, 'diagnosa': '', 'pernafasan_x_per_menit': 20.0, 'suhu_tubuh': 36.5
         }])
 
+        # --- COPY PASTE LOGIC FEATURE ENGINEERING ---
         input_df['age_category'] = pd.cut(input_df['usia'], bins=[-1,2,12,18,45,65,200], labels=['infant','child','adolescent','adult','senior','geriatric']).astype(str)
         input_df['fever_level'] = pd.cut(input_df['suhu_tubuh'], bins=[-1,36.5,37.5,38.5,60], labels=['hypothermia','normal','lowfever','highfever']).astype(str)
         input_df['resp_level'] = pd.cut(input_df['pernafasan_x_per_menit'], bins=[-1,12,20,30,200], labels=['bradypnea','normal','tachypnea','severe']).astype(str)
@@ -195,14 +213,10 @@ def predict_poli(data: PatientRequest):
         input_df['poli_triage'] = input_df.get('keluhan', '').apply(find_poli_from_keyword)
         input_df['weighted_text'] = input_df.apply(create_weighted_text, axis=1)
 
-        # 3. Rule Based Check (Priority 1)
-        poli_triage_input = str(input_df.loc[0, 'poli_triage']).strip()
-        if poli_triage_input:
-            poli_display = poli_triage_input.upper()
-            if 'KLINIK GIGI' in poli_display: poli_display = 'KLINIK GIGI & MULUT'
-            return {"status": "success", "rekomendasi_poli": poli_display, "confidence": 1.0, "source": "triage_keyword"}
-
-        # 4. Model Prediction
+        # 3. Model Prediction Process
+        # Kita perlu menjalankan model DULU untuk mendapatkan 'max_confidence'
+        # agar bisa dipakai di RULE_FALLBACK_POLI
+        
         text_vec = tfidf.transform(input_df['weighted_text'])
         text_sel = selector.transform(text_vec)
 
@@ -219,21 +233,37 @@ def predict_poli(data: PatientRequest):
         max_confidence = float(np.max(proba_vector))
         CONFIDENCE_THRESHOLD = 1.0 
 
-        # 5. Rule Based Check (Priority 2: Klinik Umum & Ambiguity)
-        if check_rule_klinik_umum(data.keluhan, poli_triage_input, max_confidence, CONFIDENCE_THRESHOLD):
-            return {"status": "success", "rekomendasi_poli": "KLINIK UMUM", "confidence": max_confidence, "source": "rule_ambiguity"}
+        # 4. Check Fallback Rules (LOGIC BARU)
+        poli_triage_input = str(input_df.loc[0, 'poli_triage']).strip()
         
-        if max_confidence < CONFIDENCE_THRESHOLD:
-            return {"status": "success", "rekomendasi_poli": "KLINIK UMUM", "confidence": max_confidence, "source": "rule_low_confidence"}
+        fallback_poli = RULE_FALLBACK_POLI(
+            keluhan_raw=data.keluhan,
+            poli_triage=poli_triage_input,
+            max_confidence=max_confidence,
+            threshold=CONFIDENCE_THRESHOLD,
+            usia=data.usia
+        )
 
-        # 6. Final Result & Adult Check
+        # A. Jika masuk aturan Fallback (Triage / Low Conf / Umum)
+        if fallback_poli is not None:
+            final_poli = fallback_poli.upper()
+            if 'KLINIK GIGI' in final_poli: final_poli = 'KLINIK GIGI & MULUT'
+            
+            return {
+                "status": "success",
+                "rekomendasi_poli": final_poli,
+                "confidence": max_confidence,
+                "source": "rule_fallback"
+            }
+
+        # B. Jika lolos aturan Fallback -> Pakai Prediksi Model
         pred_class = np.argmax(proba_vector)
         poli_pred = le.inverse_transform([pred_class])[0]
         poli_display = re.sub(r'\s*\([A-Z]\)\s*$', '', poli_pred).strip()
 
         if 'KLINIK GIGI' in poli_display.upper(): poli_display = 'KLINIK GIGI & MULUT'
 
-        # Rule Adult Check
+        # Rule Adult Check (Validasi akhir jika model prediksi anak tapi pasien dewasa)
         if data.usia >= 18 and 'ANAK' in poli_pred.upper():
             sorted_indices = np.argsort(proba_vector)[::-1]
             found_alt = False
@@ -244,14 +274,18 @@ def predict_poli(data: PatientRequest):
                     found_alt = True
                     break
             if not found_alt:
-                poli_display = 'KLINIK PENYAKIT DALAM' # Fallback aman
+                poli_display = 'KLINIK PENYAKIT DALAM'
 
-        return {"status": "success", "rekomendasi_poli": poli_display.upper(), "confidence": max_confidence, "source": "model"}
+        return {
+            "status": "success", 
+            "rekomendasi_poli": poli_display.upper(), 
+            "confidence": max_confidence, 
+            "source": "model_prediction"
+        }
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
-    # Menjalankan di port 5000 sesuai permintaan
     uvicorn.run("main:app", host="0.0.0.0", port=5000, reload=True)
