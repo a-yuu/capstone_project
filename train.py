@@ -2,11 +2,11 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import SGDClassifier
-from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_selection import SelectKBest, chi2
 from scipy.sparse import hstack, csr_matrix
+from sklearn.metrics import accuracy_score, classification_report
 import lightgbm as lgb
 import joblib
 import re
@@ -20,38 +20,27 @@ print("MEMULAI PROSES TRAINING MODEL AI")
 print("="*50)
 
 # ==========================================
-# 1. LOAD DATA & DICTIONARY
+# 1. HELPER FUNCTIONS (Harus SAMA dengan main.py)
 # ==========================================
-print("[1/8] Loading Dataset...")
-
-# Pastikan file excel ada di folder yang sama
+# (Kamus didefinisikan di global scope untuk kebutuhan fungsi cleaning)
 try:
-    df = pd.read_excel('data_diagnosa_filtered.xlsx', dtype=str, engine='openpyxl')
-    kamus = pd.read_csv('icd10_poli_clean.csv', dtype=str)
+    kamus_singkatan = pd.read_csv('kamus_singkatan.csv', dtype=str).fillna('')
+    KAMUS_SINGKATAN = dict(zip(kamus_singkatan['Singkatan'].str.lower(), kamus_singkatan['Bentuk Lengkap'].str.lower()))
     
-    # Load kamus tambahan untuk cleaning (Opsional, tapi bagus jika ada)
-    try:
-        kamus_singkatan = pd.read_csv('kamus_singkatan.csv', dtype=str).fillna('')
-        KAMUS_SINGKATAN = dict(zip(kamus_singkatan['Singkatan'].str.lower(), kamus_singkatan['Bentuk Lengkap'].str.lower()))
-        
-        kamus_medis = pd.read_csv('kamus_medis.csv', dtype=str).fillna('')
-        KAMUS_MEDIS_FULL = dict(zip(kamus_medis['istilah_lama'].str.lower(), kamus_medis['istilah_standar'].str.lower()))
-        KAMUS_MEDIS_PHRASE = {k: v for k, v in KAMUS_MEDIS_FULL.items() if " " in k}
-        KAMUS_MEDIS_TOKEN  = {k: v for k, v in KAMUS_MEDIS_FULL.items() if " " not in k}
-    except:
-        print("   Warning: File kamus tambahan tidak lengkap, cleaning standar digunakan.")
-        KAMUS_SINGKATAN = {}
-        KAMUS_MEDIS_PHRASE = {}
-        KAMUS_MEDIS_TOKEN = {}
+    kamus_medis = pd.read_csv('kamus_medis.csv', dtype=str).fillna('')
+    KAMUS_MEDIS_FULL = dict(zip(kamus_medis['istilah_lama'].str.lower(), kamus_medis['istilah_standar'].str.lower()))
+    KAMUS_MEDIS_PHRASE = {k: v for k, v in KAMUS_MEDIS_FULL.items() if " " in k}
+    KAMUS_MEDIS_TOKEN  = {k: v for k, v in KAMUS_MEDIS_FULL.items() if " " not in k}
+    
+    kamus_triage = pd.read_csv('kamus_keyword_poli.csv', dtype=str).fillna('')
+    KAMUS_KEYWORD_TRIAGE = dict(zip(kamus_triage['Keyword Keluhan'].str.lower(), kamus_triage['Poli Tujuan'].str.lower()))
+except:
+    print("Warning: File kamus tidak lengkap.")
+    KAMUS_SINGKATAN = {}
+    KAMUS_MEDIS_PHRASE = {}
+    KAMUS_MEDIS_TOKEN = {}
+    KAMUS_KEYWORD_TRIAGE = {}
 
-    df.columns = [c.strip() for c in df.columns]
-except FileNotFoundError as e:
-    print(f"ERROR: File data tidak ditemukan! {e}")
-    exit()
-
-# ==========================================
-# 2. HELPER FUNCTIONS
-# ==========================================
 medical_expansions = {
     'jantung': 'jantung cardiac cardio heart arrhythmia coronary angina pectoris cvd cardiovascular',
     'hipertensi': 'hipertensi hypertension htn tekanan tinggi darah tinggi blood pressure',
@@ -101,10 +90,8 @@ def clean_text_with_dictionaries(text):
     text = re.sub(r'\bkeluhan\b', '', text)
     text = re.sub(r'[,:;]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-
     for old, new in KAMUS_MEDIS_PHRASE.items():
         if old in text: text = text.replace(old, new)
-    
     tokens = text.split()
     tokens = [KAMUS_SINGKATAN.get(t, t) for t in tokens]
     tokens = [KAMUS_MEDIS_TOKEN.get(t, t) for t in tokens]
@@ -120,6 +107,13 @@ def enhance_medical_text(text):
     tokens = [w for w in text.split() if len(w) >= 2 and w not in stop_small]
     return ' '.join(tokens)
 
+def find_poli_from_keyword(keluhan):
+    if not keluhan: return ''
+    keluhan = str(keluhan).lower()
+    for keyword, poli in KAMUS_KEYWORD_TRIAGE.items():
+        if keyword in keluhan: return poli.strip()
+    return ''
+
 def clean_poli_label(poli):
     if pd.isna(poli): return np.nan
     text = str(poli)
@@ -133,16 +127,22 @@ def clean_poli_label(poli):
     return text.upper()
 
 # ==========================================
-# 3. PREPROCESSING & MAPPING
+# 2. LOAD & PREPROCESS DATA
 # ==========================================
-print("[2/8] Preprocessing Data...")
+print("[1/8] Loading Dataset...")
+try:
+    df = pd.read_excel('data_diagnosa_filtered.xlsx', dtype=str, engine='openpyxl')
+    kamus = pd.read_csv('icd10_poli_clean.csv', dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+except FileNotFoundError as e:
+    print(f"ERROR: File data tidak ditemukan! {e}")
+    exit()
 
-# Filter Kontrol/Follow up
+print("[2/8] Cleaning & Filtering...")
 if 'keluhan' in df.columns:
     mask_kontrol = df['keluhan'].astype(str).str.lower().str.contains(r'\bkontrol\b|\bcontrol\b|\bfollow\s*up\b|\bmcu\b', regex=True)
     df = df[~mask_kontrol].copy()
 
-# Mapping Poli
 map_poli = dict(zip(kamus['list_icd'], kamus['poli_name']))
 df['poli'] = df.get('list_icd_10', df.get('list_icd', pd.Series(['']*len(df)))).map(map_poli)
 df['poli'] = df['poli'].apply(clean_poli_label)
@@ -151,15 +151,13 @@ df = df.dropna(subset=['poli']).copy()
 # Filter Top Poli
 top_poli = df['poli'].value_counts().head(10).index.tolist()
 df = df[df['poli'].isin(top_poli)].copy()
-print(f"   Fokus pada {len(top_poli)} poli teratas.")
 
-# Numeric Handling
+# Feature Engineering
 for col in ['usia', 'pernafasan_x_per_menit', 'suhu_tubuh']:
     df[col] = pd.to_numeric(df[col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce')
     median_val = df[col].median(skipna=True)
     df[col].fillna(median_val if not np.isnan(median_val) else 0, inplace=True)
 
-# Feature Engineering
 df['age_category'] = pd.cut(df['usia'], bins=[-1,2,12,18,45,65,200], labels=['infant','child','adolescent','adult','senior','geriatric']).astype(str)
 df['fever_level'] = pd.cut(df['suhu_tubuh'], bins=[-1,36.5,37.5,38.5,60], labels=['hypothermia','normal','lowfever','highfever']).astype(str)
 df['resp_level'] = pd.cut(df['pernafasan_x_per_menit'], bins=[-1,12,20,30,200], labels=['bradypnea','normal','tachypnea','severe']).astype(str)
@@ -176,15 +174,17 @@ df['age_risk'] = (df['pediatric_case']*2 + df['geriatric_case']*3).astype(int)
 df['keluhan_enhanced'] = df.get('keluhan', '').apply(enhance_medical_text)
 df['diagnosa_enhanced'] = df.get('diagnosa', '').apply(enhance_medical_text)
 df['riwayat_enhanced'] = df.get('riwayat_penyakit', '').astype(str).apply(enhance_medical_text)
+df['poli_triage'] = df.get('keluhan', '').apply(find_poli_from_keyword)
 
 def create_weighted_text(row):
     text = (str(row['diagnosa_enhanced']) + " ") * 2
     text += (str(row['riwayat_enhanced']) + " ") * 3
     text += (str(row['keluhan_enhanced']) + " ")
-    
+    # Masukkan poli triage ke dalam teks latih agar model belajar dari keyword juga
+    if str(row['poli_triage']):
+        text += " " + str(row['poli_triage']).replace(' ', '_').upper() * 5
     demo_text = f"{row['age_category']} {row['jenis_kelamin']} {row['fever_level']} {row['resp_level']}"
     text += " " + (demo_text + " ") * 3
-    
     if row['vital_severity'] >= 4: text += " CRITICAL_CASE HIGH_ACUITY " * 2
     if row['pediatric_case'] == 1: text += " PEDIATRIC_SPECIALTY CHILD_MEDICINE " * 2
     if row['geriatric_case'] == 1: text += " GERIATRIC_SPECIALTY ELDERLY_CARE " * 2
@@ -193,7 +193,7 @@ def create_weighted_text(row):
 df['weighted_text'] = df.apply(create_weighted_text, axis=1)
 
 # ==========================================
-# 4. TRAINING PIPELINE
+# 3. TRAINING & SAVING
 # ==========================================
 print("[3/8] Encoding & Splitting...")
 le = LabelEncoder()
@@ -229,9 +229,6 @@ X_test_final = hstack([csr_matrix(emb_test_scaled * 2.0), X_test_tfidf_selected 
 svm = SGDClassifier(loss='hinge', alpha=3e-5, max_iter=2500, tol=5e-5, class_weight='balanced', random_state=42, n_jobs=-1)
 svm.fit(X_train_final, y_train)
 
-# ==========================================
-# 5. EVALUATION & SAVING
-# ==========================================
 print("[7/8] Evaluasi Model...")
 y_pred = svm.predict(X_test_final)
 acc = accuracy_score(y_test, y_pred)
@@ -245,7 +242,4 @@ joblib.dump(le, 'encoder_final.pkl')
 joblib.dump(lgb_model, 'lgb_final.pkl')
 joblib.dump(scaler, 'scaler_final.pkl')
 
-print("\n" + "="*50)
-print("SELESAI! Semua file model (.pkl) telah dibuat.")
-print("Sekarang Anda bisa menjalankan: uvicorn main:app --reload")
-print("="*50)
+print("SELESAI! Model disimpan.")
