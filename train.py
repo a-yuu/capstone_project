@@ -11,24 +11,26 @@ import lightgbm as lgb
 import joblib
 import re
 import os
+import gc  # Garbage Collector untuk hemat RAM
 import warnings
 
 warnings.filterwarnings('ignore')
 
 print("="*50)
-print("MEMULAI PROSES TRAINING MODEL AI")
+print("MEMULAI PROSES TRAINING MODEL AI (OPTIMIZED)")
 print("="*50)
 
 # ==========================================
-# 1. HELPER FUNCTIONS (Harus SAMA dengan main.py)
+# 1. HELPER FUNCTIONS & DICTIONARIES
 # ==========================================
-# (Kamus didefinisikan di global scope untuk kebutuhan fungsi cleaning)
 try:
     kamus_singkatan = pd.read_csv('kamus_singkatan.csv', dtype=str).fillna('')
     KAMUS_SINGKATAN = dict(zip(kamus_singkatan['Singkatan'].str.lower(), kamus_singkatan['Bentuk Lengkap'].str.lower()))
     
     kamus_medis = pd.read_csv('kamus_medis.csv', dtype=str).fillna('')
     KAMUS_MEDIS_FULL = dict(zip(kamus_medis['istilah_lama'].str.lower(), kamus_medis['istilah_standar'].str.lower()))
+    
+    # Pisahkan phrase dan token (Logic baru Cell 5)
     KAMUS_MEDIS_PHRASE = {k: v for k, v in KAMUS_MEDIS_FULL.items() if " " in k}
     KAMUS_MEDIS_TOKEN  = {k: v for k, v in KAMUS_MEDIS_FULL.items() if " " not in k}
     
@@ -74,6 +76,25 @@ medical_expansions = {
     'darurat': 'darurat emergency critical urgent acute life-threatening'
 }
 
+def extract_core_keluhan(text):
+    """
+    Fungsi baru dari Cell 5: Mengambil inti keluhan, membuang 'KU: Sedang' dll.
+    """
+    if pd.isna(text): return ""
+    s = str(text).lower().replace('\n', ' ')
+    s = re.sub(r'\s+', ' ', s).strip()
+    
+    # Cari pola 'kel' atau 'keluhan'
+    m = re.search(r'\bkel(?:uhan)?\b[^a-z0-9]*[:;\-]*\s*(.*)', s)
+    if m:
+        core = m.group(1).strip()
+    else:
+        core = s
+        
+    core = core.strip()
+    core = re.sub(r'^[\-\.,:]+$', '', core).strip()
+    return core
+
 def remove_corrupt_patterns(text):
     text = str(text)
     text = re.sub(r'_x000D_', ' ', text, flags=re.IGNORECASE)
@@ -84,14 +105,19 @@ def remove_corrupt_patterns(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 def clean_text_with_dictionaries(text):
+    """Update logika cleaning sesuai Cell 5"""
     if pd.isna(text): return ""
     text = remove_corrupt_patterns(text).lower()
     text = re.sub(r'\brspb\b', '', text)
     text = re.sub(r'\bkeluhan\b', '', text)
     text = re.sub(r'[,:;]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
+
+    # 1. Ganti Phrase (Multi-kata) dulu
     for old, new in KAMUS_MEDIS_PHRASE.items():
         if old in text: text = text.replace(old, new)
+    
+    # 2. Ganti Token (Per-kata)
     tokens = text.split()
     tokens = [KAMUS_SINGKATAN.get(t, t) for t in tokens]
     tokens = [KAMUS_MEDIS_TOKEN.get(t, t) for t in tokens]
@@ -108,6 +134,7 @@ def enhance_medical_text(text):
     return ' '.join(tokens)
 
 def find_poli_from_keyword(keluhan):
+    """Versi Dictionary untuk Training (Cell 5)"""
     if not keluhan: return ''
     keluhan = str(keluhan).lower()
     for keyword, poli in KAMUS_KEYWORD_TRIAGE.items():
@@ -149,7 +176,7 @@ df['poli'] = df['poli'].apply(clean_poli_label)
 df = df.dropna(subset=['poli']).copy()
 
 # Filter Top Poli
-top_poli = df['poli'].value_counts().head(10).index.tolist()
+top_poli = df['poli'].value_counts().head(8).index.tolist() # Mengikuti notebook: 8 poli
 df = df[df['poli'].isin(top_poli)].copy()
 
 # Feature Engineering
@@ -170,17 +197,19 @@ df['adult_case'] = ((df['usia'] >= 18) & (df['usia'] <= 65)).astype(int)
 df['vital_severity'] = (df['critical_fever']*2 + df['critical_resp']*2 + (df['suhu_tubuh']>37.5).astype(int) + (df['pernafasan_x_per_menit']>20).astype(int)).astype(int)
 df['age_risk'] = (df['pediatric_case']*2 + df['geriatric_case']*3).astype(int)
 
-# Text Enrichment
-df['keluhan_enhanced'] = df.get('keluhan', '').apply(enhance_medical_text)
+# Text Enrichment (Sesuai Cell 8)
+df['keluhan_core'] = df.get('keluhan', '').apply(extract_core_keluhan) # NEW STEP
+df = df[df['keluhan_core'].astype(str).str.strip() != ''].copy() # Drop empty core
+
+df['keluhan_enhanced'] = df['keluhan_core'].apply(enhance_medical_text) # Use core
 df['diagnosa_enhanced'] = df.get('diagnosa', '').apply(enhance_medical_text)
 df['riwayat_enhanced'] = df.get('riwayat_penyakit', '').astype(str).apply(enhance_medical_text)
-df['poli_triage'] = df.get('keluhan', '').apply(find_poli_from_keyword)
+df['poli_triage'] = df['keluhan_core'].apply(find_poli_from_keyword) # Use core
 
 def create_weighted_text(row):
     text = (str(row['diagnosa_enhanced']) + " ") * 2
     text += (str(row['riwayat_enhanced']) + " ") * 3
     text += (str(row['keluhan_enhanced']) + " ")
-    # Masukkan poli triage ke dalam teks latih agar model belajar dari keyword juga
     if str(row['poli_triage']):
         text += " " + str(row['poli_triage']).replace(' ', '_').upper() * 5
     demo_text = f"{row['age_category']} {row['jenis_kelamin']} {row['fever_level']} {row['resp_level']}"
@@ -193,21 +222,31 @@ def create_weighted_text(row):
 df['weighted_text'] = df.apply(create_weighted_text, axis=1)
 
 # ==========================================
-# 3. TRAINING & SAVING
+# 3. TRAINING & SAVING (MEMORY OPTIMIZED)
 # ==========================================
 print("[3/8] Encoding & Splitting...")
 le = LabelEncoder()
 y = le.fit_transform(df['poli'])
 X_train, X_test, y_train, y_test = train_test_split(df, y, test_size=0.2, random_state=42, stratify=y)
 
+# [MEMORY FIX] Hapus df besar
+del df
+gc.collect()
+
 print("[4/8] Vectorizing Text (TF-IDF)...")
-tfidf = TfidfVectorizer(max_features=15000, ngram_range=(1,5), min_df=2, max_df=0.92, sublinear_tf=True, token_pattern=r'[a-zA-Z_]{2,}')
+# [MEMORY FIX] Kurangi max_features jadi 10000 agar muat di RAM
+tfidf = TfidfVectorizer(max_features=10000, ngram_range=(1,5), min_df=2, max_df=0.92, sublinear_tf=True, token_pattern=r'[a-zA-Z_]{2,}')
 X_train_tfidf = tfidf.fit_transform(X_train['weighted_text'])
 X_test_tfidf = tfidf.transform(X_test['weighted_text'])
 
-selector = SelectKBest(chi2, k=min(12000, X_train_tfidf.shape[1]))
+# [MEMORY FIX] Kurangi k SelectKBest
+selector = SelectKBest(chi2, k=min(8000, X_train_tfidf.shape[1]))
 X_train_tfidf_selected = selector.fit_transform(X_train_tfidf, y_train)
 X_test_tfidf_selected = selector.transform(X_test_tfidf)
+
+# [MEMORY FIX] Hapus variable tfidf mentah
+del X_train_tfidf, X_test_tfidf
+gc.collect()
 
 print("[5/8] Training LightGBM (Numeric)...")
 numerical_features = ['usia','pernafasan_x_per_menit','suhu_tubuh','critical_fever','critical_resp','pediatric_case','geriatric_case','vital_severity','age_risk','adult_case']
@@ -223,8 +262,18 @@ emb_train_scaled = scaler.fit_transform(emb_train)
 emb_test_scaled = scaler.transform(emb_test)
 
 print("[6/8] Fusion & Training SVM...")
+# [MEMORY FIX] Konversi ke float32 untuk hemat 50% memori sebelum hstack
+emb_train_scaled = emb_train_scaled.astype(np.float32)
+emb_test_scaled = emb_test_scaled.astype(np.float32)
+X_train_tfidf_selected = X_train_tfidf_selected.astype(np.float32)
+X_test_tfidf_selected = X_test_tfidf_selected.astype(np.float32)
+
 X_train_final = hstack([csr_matrix(emb_train_scaled * 2.0), X_train_tfidf_selected * 1.2])
 X_test_final = hstack([csr_matrix(emb_test_scaled * 2.0), X_test_tfidf_selected * 1.2])
+
+# [MEMORY FIX] Clean up
+del emb_train_scaled, X_train_tfidf_selected, emb_test_scaled, X_test_tfidf_selected
+gc.collect()
 
 svm = SGDClassifier(loss='hinge', alpha=3e-5, max_iter=2500, tol=5e-5, class_weight='balanced', random_state=42, n_jobs=-1)
 svm.fit(X_train_final, y_train)
